@@ -27,6 +27,7 @@ import { BillingSaleInvoiceApi } from '../../services/billing-sale-invoice.api';
 import { BillingSaleReturnApi } from '../../services/billing-sale-return.api';
 import { SaleReturnPreviewComponent } from '../sale-return-preview/sale-return-preview.component';
 import { calcReturnTotals, deriveReturnState, returnOrdinals } from '../../utils/sale-return';
+import { billingErrorMessage } from '../../utils/billing-error';
 import { buildReturnQuery } from '../../utils/return-trail';
 import { calcTotals, centsToPesos, lineSubtotalCents, pesosToCents } from '../../utils/money';
 import { BillingStatusBadgeComponent } from '../billing-status-badge/billing-status-badge.component';
@@ -229,7 +230,7 @@ export class SaleInvoiceFormComponent implements OnInit, OnDestroy {
 
   /** Atajo a Productos: asegura el borrador guardado y deja el rastro para volver. */
   async createProduct(): Promise<void> {
-    if (!this.editable()) return;
+    if (!this.editable() || this.busy()) return;
     this.busy.set(true);
     try {
       await this.persist(); // vacía el autosave pendiente; no crea borrador si está vacío
@@ -246,7 +247,7 @@ export class SaleInvoiceFormComponent implements OnInit, OnDestroy {
 
   /** Atajo a Clientes/Proveedores: asegura el borrador guardado y deja el rastro para volver. */
   async createClient(): Promise<void> {
-    if (!this.editable()) return;
+    if (!this.editable() || this.busy()) return;
     this.busy.set(true);
     try {
       await this.persist();
@@ -325,16 +326,21 @@ export class SaleInvoiceFormComponent implements OnInit, OnDestroy {
   // --- acciones ---
 
   async saveDraft(): Promise<void> {
-    if (!this.editable()) return;
+    // Reentrada: mientras hay una acción en curso, los clics extra se ignoran (aunque el botón tarde en deshabilitarse)
+    if (!this.editable() || this.busy()) return;
+    this.busy.set(true);
     try {
       await this.persist(true);
       this.toast('success', 'Borrador guardado', 'Los cambios se guardaron correctamente.');
     } catch (e) {
       this.toast('error', 'No se pudo guardar', this.errorMessage(e));
+    } finally {
+      this.busy.set(false);
     }
   }
 
   confirmEmit(): void {
+    if (this.busy()) return;
     const error = this.validateForEmit();
     if (error) {
       this.toast('warn', 'No se puede emitir', error);
@@ -351,6 +357,7 @@ export class SaleInvoiceFormComponent implements OnInit, OnDestroy {
   }
 
   confirmDelete(): void {
+    if (this.busy()) return;
     this.confirmation.confirm({
       header: 'Eliminar borrador',
       icon: 'pi pi-exclamation-triangle',
@@ -375,6 +382,7 @@ export class SaleInvoiceFormComponent implements OnInit, OnDestroy {
   // --- internos ---
 
   private async emit(): Promise<void> {
+    if (this.busy()) return; // bandera de reentrada: N clics => una sola emisión
     this.busy.set(true);
     try {
       await this.persist(); // asegura que lo último editado quede guardado antes de emitir
@@ -390,6 +398,7 @@ export class SaleInvoiceFormComponent implements OnInit, OnDestroy {
   }
 
   private async deleteDraft(): Promise<void> {
+    if (this.busy()) return;
     const id = this.invoiceId();
     this.dirty = false; // evita que ngOnDestroy vuelva a guardar lo que se acaba de borrar
     this.busy.set(true);
@@ -488,7 +497,7 @@ export class SaleInvoiceFormComponent implements OnInit, OnDestroy {
   }
 
   private errorMessage(e: unknown): string {
-    return e instanceof Error ? e.message : 'Ocurrió un error inesperado.';
+    return billingErrorMessage(e); // incluye BILLING_IDEMPOTENCY_CONFLICT (409)
   }
 
   // Helpers expuestos a la plantilla

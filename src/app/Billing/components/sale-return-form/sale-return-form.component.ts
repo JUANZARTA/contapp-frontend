@@ -16,6 +16,7 @@ import { DOCUMENT_KIND_CONFIG, DocumentKind } from '../../models/document-kind';
 import { CopCentsPipe } from '../../pipes/cop-cents.pipe';
 import { BillingSaleInvoiceApi } from '../../services/billing-sale-invoice.api';
 import { BillingSaleReturnApi } from '../../services/billing-sale-return.api';
+import { billingErrorMessage } from '../../utils/billing-error';
 import { calcReturnTotals, returnLineSubtotalCents } from '../../utils/sale-return';
 import { BillingStatusBadgeComponent } from '../billing-status-badge/billing-status-badge.component';
 
@@ -210,6 +211,7 @@ export class SaleReturnFormComponent implements OnInit, OnDestroy {
   // --- acciones ---
 
   confirmEmit(): void {
+    if (this.busy()) return;
     const error = this.validateForEmit();
     if (error) {
       this.toast('warn', 'No se puede emitir', error);
@@ -226,6 +228,7 @@ export class SaleReturnFormComponent implements OnInit, OnDestroy {
   }
 
   confirmDelete(): void {
+    if (this.busy()) return;
     this.confirmation.confirm({
       header: 'Eliminar borrador',
       icon: 'pi pi-exclamation-triangle',
@@ -246,6 +249,7 @@ export class SaleReturnFormComponent implements OnInit, OnDestroy {
   }
 
   async confirmAnnul(): Promise<void> {
+    if (this.annulling()) return; // reentrada: N clics => una sola anulación
     if (!this.annulReasonText.trim()) {
       this.toast('warn', 'Motivo requerido', 'Indica el motivo de la anulación.');
       return;
@@ -277,6 +281,7 @@ export class SaleReturnFormComponent implements OnInit, OnDestroy {
   // --- internos ---
 
   private async emit(): Promise<void> {
+    if (this.busy()) return; // bandera de reentrada: N clics => una sola emisión
     this.busy.set(true);
     try {
       await this.persist(true); // asegura que lo último editado quede guardado antes de emitir
@@ -291,6 +296,7 @@ export class SaleReturnFormComponent implements OnInit, OnDestroy {
   }
 
   private async deleteDraft(): Promise<void> {
+    if (this.busy()) return;
     const id = this.returnId();
     this.dirty = false; // evita que ngOnDestroy vuelva a guardar lo que se acaba de borrar
     this.busy.set(true);
@@ -397,7 +403,7 @@ export class SaleReturnFormComponent implements OnInit, OnDestroy {
   }
 
   private errorMessage(e: unknown): string {
-    return e instanceof Error ? e.message : 'Ocurrió un error inesperado.';
+    return billingErrorMessage(e); // incluye BILLING_IDEMPOTENCY_CONFLICT (409)
   }
 
   // Helper expuesto a la plantilla

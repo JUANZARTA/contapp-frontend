@@ -14,6 +14,7 @@ import {
 import { BillingSaleReturnApi } from './billing-sale-return.api';
 import { BillingDocumentKindRegistry, INVOICE_BASE, RETURN_BASE } from './billing-document-kind-registry';
 import { LocalStorageMethods } from '../../Shared/Methods/local-storage.method';
+import { IDEMPOTENCY_HEADER, IdempotencyKeyStore } from './idempotency-key.store';
 
 interface ReturnLineDto {
   sourceLineNo: number | null;
@@ -104,6 +105,7 @@ export class BillingHttpSaleReturnApi extends BillingSaleReturnApi {
   private readonly http = inject(HttpClient);
   private readonly localStorageMethods = inject(LocalStorageMethods);
   private readonly registry = inject(BillingDocumentKindRegistry);
+  private readonly idempotency = inject(IdempotencyKeyStore);
 
   private getEnterpriseId(): string {
     return this.localStorageMethods.getIdEnterprise();
@@ -222,10 +224,22 @@ export class BillingHttpSaleReturnApi extends BillingSaleReturnApi {
             cantidad: l.cantidad,
           })),
         };
-        const request = input.id
-          ? this.http.put<ReturnDto>(`${RETURN_BASE[kind]}/${input.id}`, body, { params })
-          : this.http.post<ReturnDto>(RETURN_BASE[kind], body, { params });
-        return request.pipe(tap((r) => this.registry.remember(r.id, kind)));
+        if (input.id) {
+          return this.http
+            .put<ReturnDto>(`${RETURN_BASE[kind]}/${input.id}`, body, { params })
+            .pipe(tap((r) => this.registry.remember(r.id, kind)));
+        }
+        // Creación: misma clave mientras el cuerpo no cambie (doble clic o reintento); se libera al éxito
+        const scope = `return:${kind}:${input.invoiceId}`;
+        const key = this.idempotency.keyFor(scope, body);
+        return this.http
+          .post<ReturnDto>(RETURN_BASE[kind], body, { params, headers: { [IDEMPOTENCY_HEADER]: key } })
+          .pipe(
+            tap((r) => {
+              this.idempotency.release(scope, key);
+              this.registry.remember(r.id, kind);
+            }),
+          );
       }),
       map(toSaleReturn),
     );

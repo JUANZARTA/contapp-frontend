@@ -12,6 +12,7 @@ import { INVOICE_STATUS_LABEL, InvoiceStatus, SaleInvoice } from '../../models/b
 import { DOCUMENT_KIND_CONFIG, DocumentKind, KIND_FILTER_OPTIONS } from '../../models/document-kind';
 import { CopCentsPipe } from '../../pipes/cop-cents.pipe';
 import { BillingSaleInvoiceApi } from '../../services/billing-sale-invoice.api';
+import { billingErrorMessage } from '../../utils/billing-error';
 import { calcTotals } from '../../utils/money';
 import { BillingKindTagComponent } from '../billing-kind-tag/billing-kind-tag.component';
 import { BillingStatusBadgeComponent } from '../billing-status-badge/billing-status-badge.component';
@@ -92,6 +93,7 @@ export class SaleInvoiceListComponent implements OnInit {
   }
 
   async confirmAnnul(): Promise<void> {
+    if (this.annulling()) return; // reentrada: N clics => una sola anulación
     const target = this.annulTarget();
     if (!target) return;
     if (!this.annulReason.trim()) {
@@ -105,7 +107,7 @@ export class SaleInvoiceListComponent implements OnInit {
       this.closeAnnul();
       this.load();
     } catch (e) {
-      const detail = e instanceof Error ? e.message : 'Ocurrió un error inesperado.';
+      const detail = billingErrorMessage(e);
       this.messages.add({ severity: 'error', summary: 'No se pudo anular', detail });
     } finally {
       this.annulling.set(false);

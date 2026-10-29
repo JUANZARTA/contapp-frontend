@@ -1,11 +1,12 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpErrorResponse, HttpParams } from '@angular/common/http';
-import { Observable, catchError, forkJoin, map, of, switchMap, tap, throwError } from 'rxjs';
+import { Observable, catchError, defer, forkJoin, map, of, switchMap, tap, throwError } from 'rxjs';
 import { InvoiceStatus, SaleInvoice, SaleInvoiceDraftInput } from '../models/billing-sale-invoice.model';
 import { DocumentKind } from '../models/document-kind';
 import { BillingSaleInvoiceApi } from './billing-sale-invoice.api';
 import { BillingDocumentKindRegistry, INVOICE_BASE } from './billing-document-kind-registry';
 import { LocalStorageMethods } from '../../Shared/Methods/local-storage.method';
+import { IDEMPOTENCY_HEADER, IdempotencyKeyStore } from './idempotency-key.store';
 
 const KINDS: DocumentKind[] = ['SALE', 'PURCHASE'];
 
@@ -14,6 +15,7 @@ export class BillingHttpSaleInvoiceApi extends BillingSaleInvoiceApi {
   private readonly http = inject(HttpClient);
   private readonly localStorageMethods = inject(LocalStorageMethods);
   private readonly registry = inject(BillingDocumentKindRegistry);
+  private readonly idempotency = inject(IdempotencyKeyStore);
 
   private getEnterpriseId(): string {
     return this.localStorageMethods.getIdEnterprise();
@@ -71,10 +73,24 @@ export class BillingHttpSaleInvoiceApi extends BillingSaleInvoiceApi {
   saveDraft(input: SaleInvoiceDraftInput): Observable<SaleInvoice> {
     const params = this.params();
     const kind = input.id ? (this.registry.kindOf(input.id) ?? input.kind) : input.kind;
-    const request = input.id
-      ? this.http.put<SaleInvoice>(`${INVOICE_BASE[kind]}/${input.id}`, input, { params })
-      : this.http.post<SaleInvoice>(INVOICE_BASE[kind], input, { params });
-    return request.pipe(tap((invoice) => this.registry.remember(invoice.id, kind)));
+    if (input.id) {
+      return this.http
+        .put<SaleInvoice>(`${INVOICE_BASE[kind]}/${input.id}`, input, { params })
+        .pipe(tap((invoice) => this.registry.remember(invoice.id, kind)));
+    }
+    // Creación: la clave se toma al suscribir, así un reintento del mismo cuerpo reutiliza la misma clave
+    return defer(() => {
+      const scope = `invoice:${kind}`;
+      const key = this.idempotency.keyFor(scope, input);
+      return this.http
+        .post<SaleInvoice>(INVOICE_BASE[kind], input, { params, headers: { [IDEMPOTENCY_HEADER]: key } })
+        .pipe(
+          tap((invoice) => {
+            this.idempotency.release(scope, key);
+            this.registry.remember(invoice.id, kind);
+          }),
+        );
+    });
   }
 
   deleteDraft(id: string): Observable<void> {

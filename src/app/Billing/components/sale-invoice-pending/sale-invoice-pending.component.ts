@@ -14,6 +14,7 @@ import { DOCUMENT_KIND_CONFIG, DocumentKind, KIND_FILTER_OPTIONS } from '../../m
 import { CopCentsPipe } from '../../pipes/cop-cents.pipe';
 import { BillingCounterpartyCatalog } from '../../services/billing-counterparty-catalog';
 import { BillingSaleInvoiceApi } from '../../services/billing-sale-invoice.api';
+import { billingErrorMessage } from '../../utils/billing-error';
 import { calcTotals } from '../../utils/money';
 import { BillingKindTagComponent } from '../billing-kind-tag/billing-kind-tag.component';
 import { SaleInvoicePreviewComponent } from '../sale-invoice-preview/sale-invoice-preview.component';
@@ -109,6 +110,7 @@ export class SaleInvoicePendingComponent implements OnInit {
   }
 
   confirmDuplicate(invoice: SaleInvoice): void {
+    if (this.busy()) return;
     this.confirmation.confirm({
       header: 'Duplicar borrador',
       message: `Se creará un nuevo borrador con el mismo ${DOCUMENT_KIND_CONFIG[invoice.kind].counterpartyLower} y las mismas líneas. ¿Continuar?`,
@@ -119,6 +121,7 @@ export class SaleInvoicePendingComponent implements OnInit {
   }
 
   confirmDelete(invoice: SaleInvoice): void {
+    if (this.busy()) return;
     this.confirmation.confirm({
       header: 'Eliminar borrador',
       icon: 'pi pi-exclamation-triangle',
@@ -137,6 +140,7 @@ export class SaleInvoicePendingComponent implements OnInit {
   // efectivos de cada línea (precio e IVA editados). Las referencias de catálogo las vuelve a fijar la API.
   // No copia el N.º de factura del proveedor: cada factura de compra tiene el suyo.
   private async duplicate(invoice: SaleInvoice): Promise<void> {
+    if (this.busy()) return; // reentrada: N clics => un solo duplicado
     this.busy.set(true);
     try {
       const lines: SaleInvoiceLineInput[] = invoice.lines.map(
@@ -155,6 +159,7 @@ export class SaleInvoicePendingComponent implements OnInit {
   }
 
   private async remove(invoice: SaleInvoice): Promise<void> {
+    if (this.busy()) return;
     this.busy.set(true);
     try {
       await firstValueFrom(this.api.deleteDraft(invoice.id));
@@ -172,6 +177,6 @@ export class SaleInvoicePendingComponent implements OnInit {
   }
 
   private errorMessage(e: unknown): string {
-    return e instanceof Error ? e.message : 'Ocurrió un error inesperado.';
+    return billingErrorMessage(e); // incluye BILLING_IDEMPOTENCY_CONFLICT (409)
   }
 }
